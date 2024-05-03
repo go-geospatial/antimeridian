@@ -1,6 +1,6 @@
 module github.com/go-geospatial/antimeridian
 
-go 1.21
+go 1.22
 
 require github.com/onsi/ginkgo/v2 v2.17.2
 
