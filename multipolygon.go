@@ -15,28 +15,8 @@
 
 package antimeridian
 
-import (
-	"errors"
+import "github.com/twpayne/go-geom"
 
-	"github.com/twpayne/go-geom"
-)
-
-var (
-	ErrUnsupportedType   = errors.New("unsupported geometry type")
-	ErrUnsupportedLayout = errors.New("unsupported geometry layout")
-)
-
-// Cut divides a geometry at the antimeridian and the
-// poles. A multi-geometry is returned with the cut
-// portions of the original geometry.
-func Cut(obj geom.T) (geom.T, error) {
-	switch geometry := obj.(type) {
-	case *geom.Polygon:
-		return cutPolygon(geometry)
-	case *geom.MultiPolygon:
-		return cutMultiPolygon(geometry)
-	default:
-		// unsupported type
-		return obj, ErrUnsupportedType
-	}
+func cutMultiPolygon(poly *geom.MultiPolygon) (*geom.MultiPolygon, error) {
+	return poly, nil
 }
