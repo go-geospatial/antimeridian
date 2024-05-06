@@ -68,6 +68,8 @@ func ContainsPoint(pt geom.Coord, ring *geom.LinearRing) bool {
 }
 
 func rayIntersectsSegment(p, a, b geom.Coord) bool {
+	// See: https://www.ecse.rpi.edu/Homepages/wrf/Research/Short_Notes/pnpoly.html
+	// For description of the algorithm
 	return (a[1] > p[1]) != (b[1] > p[1]) &&
 		p[0] < (b[0]-a[0])*(p[1]-a[1])/(b[1]-a[1])+a[0]
 }

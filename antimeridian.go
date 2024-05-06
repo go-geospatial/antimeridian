@@ -26,15 +26,19 @@ var (
 	ErrUnsupportedLayout = errors.New("unsupported geometry layout")
 )
 
-// Cut divides a geometry at the antimeridian and the
-// poles. A multi-geometry is returned with the cut
-// portions of the original geometry.
-func Cut(obj geom.T) (geom.T, error) {
+// Cut divides a geometry at the antimeridian and the poles. A multi-geometry is
+// returned with the cut portions of the original geometry.
+//
+// By default Cut attempts to fix improperly wound geometries Howevever, there
+// are instances where the polygon may be correctly but antimeridian cannot
+// determine this to be so; for example, when the polygon extends over both the
+// north and south pole. For these instances, pass fixWinding = false
+func Cut(obj geom.T, fixWinding ...bool) (geom.T, error) {
 	switch geometry := obj.(type) {
 	case *geom.Polygon:
-		return cutPolygon(geometry)
+		return cutPolygon(geometry, fixWinding...)
 	case *geom.MultiPolygon:
-		return cutMultiPolygon(geometry)
+		return cutMultiPolygon(geometry, fixWinding...)
 	default:
 		// unsupported type
 		return obj, ErrUnsupportedType

@@ -16,7 +16,6 @@
 package antimeridian
 
 import (
-	"fmt"
 	"math"
 	"slices"
 
@@ -29,8 +28,13 @@ type edge struct {
 	Val   float64
 }
 
-func cutPolygon(poly *geom.Polygon) (geom.T, error) {
-	polygons, err := fixPolygonToList(poly)
+func cutPolygon(poly *geom.Polygon, fixWindingArr ...bool) (geom.T, error) {
+	fixWinding := true
+	if len(fixWindingArr) > 0 {
+		fixWinding = fixWindingArr[0]
+	}
+
+	polygons, err := fixPolygonToList(poly, fixWinding)
 	if err != nil {
 		return nil, err
 	}
@@ -46,64 +50,83 @@ func cutPolygon(poly *geom.Polygon) (geom.T, error) {
 		}
 	}
 
-	return poly, nil
+	// more than one polygon was returned which means we should return a
+	// multipolygon
+
+	multiPolygon := geom.NewMultiPolygon(poly.Layout())
+	for _, polygon := range polygons {
+		multiPolygon.Push(polygon)
+	}
+
+	return multiPolygon, nil
 }
 
-func fixPolygonToList(poly *geom.Polygon) ([]*geom.Polygon, error) {
-	if poly.Layout() != geom.XY || poly.Layout() != geom.XYZ {
+func fixPolygonToList(poly *geom.Polygon, shouldFixWinding bool) ([]*geom.Polygon, error) {
+	if poly.Layout() != geom.XY && poly.Layout() != geom.XYZ {
 		return nil, ErrUnsupportedLayout
 	}
+
+	var (
+		polygons  []*geom.Polygon
+		interiors = make([][]geom.Coord, 0)
+	)
 
 	numCoords := 2
 	if poly.Layout() == geom.XYZ {
 		numCoords = 3
 	}
 
-	var polygons []*geom.Polygon
-	segments := segment(poly.LinearRing(0).Coords())
-
-	interiors := make([][]geom.Coord, 0)
+	exterior := normalize(poly.LinearRing(0).Coords())
+	segments := segment(exterior)
 
 	if len(segments) == 0 {
-		correctlyWoundPolygon := fixWinding(poly)
-		polygons = append(polygons, correctlyWoundPolygon)
+		if shouldFixWinding {
+			correctlyWoundPolygon := fixWinding(poly)
+			polygons = append(polygons, correctlyWoundPolygon)
+		} else {
+			polygons = append(polygons, poly)
+		}
+
 		return polygons, nil
 	} else {
 		for idx := range poly.NumLinearRings() - 1 {
 			interior := poly.LinearRing(idx + 1)
 			interiorSegments := segment(interior.Coords())
 			if len(interiorSegments) > 0 {
-				flatCoords := make([]float64, 0, len(interior.Coords())*numCoords)
-				// unwrap coordinates
-				for _, coord := range interior.Coords() {
-					flatCoords = append(flatCoords, math.Mod(coord[0], 360))
-					flatCoords = append(flatCoords, coord[1])
-					if numCoords == 3 {
-						flatCoords = append(flatCoords, coord[2])
-					}
-				}
+				if shouldFixWinding {
+					flatCoords := make([]float64, 0, len(interior.Coords())*numCoords)
 
-				// if the interior ring is counter-clockwise, make it clockwise
-				if xy.IsRingCounterClockwise(poly.Layout(), flatCoords) {
-					coords := make([]geom.Coord, 0, len(interior.Coords()))
-					for idx := range len(interior.Coords()) {
-						switch poly.Layout() {
-						case geom.XY:
-							x := idx * 2
-							y := x + 1
-							coords = append(coords, geom.Coord{flatCoords[x], flatCoords[y]})
-						case geom.XYZ:
-							x := idx * 3
-							y := x + 1
-							z := y + 1
-							coords = append(coords, geom.Coord{flatCoords[x], flatCoords[y], flatCoords[z]})
-						default:
-							return nil, ErrUnsupportedLayout
+					// unwrap coordinates
+					for _, coord := range interior.Coords() {
+						flatCoords = append(flatCoords, math.Mod(coord[0], 360))
+						flatCoords = append(flatCoords, coord[1])
+						if numCoords == 3 {
+							flatCoords = append(flatCoords, coord[2])
 						}
 					}
 
-					slices.Reverse(coords)
-					interiorSegments = segment(coords)
+					// if the interior ring is counter-clockwise, make it clockwise
+					if xy.IsRingCounterClockwise(poly.Layout(), flatCoords) {
+						coords := make([]geom.Coord, 0, len(interior.Coords()))
+						for idx := range len(interior.Coords()) {
+							switch poly.Layout() {
+							case geom.XY:
+								x := idx * 2
+								y := x + 1
+								coords = append(coords, geom.Coord{flatCoords[x], flatCoords[y]})
+							case geom.XYZ:
+								x := idx * 3
+								y := x + 1
+								z := y + 1
+								coords = append(coords, geom.Coord{flatCoords[x], flatCoords[y], flatCoords[z]})
+							default:
+								return nil, ErrUnsupportedLayout
+							}
+						}
+
+						slices.Reverse(coords)
+						interiorSegments = segment(coords)
+					}
 				}
 
 				segments = append(segments, interiorSegments...)
@@ -113,21 +136,22 @@ func fixPolygonToList(poly *geom.Polygon) ([]*geom.Polygon, error) {
 		}
 	}
 
-	segments = extendOverPoles(segments)
+	segments = extendOverPoles(segments, shouldFixWinding)
 	polygons = buildPolygons(poly.Layout(), segments)
 
 	// add interiors to the correct polygons
-	for ii, polygon := range polygons {
-		for jj, interior := range interiors {
-			fmt.Println(ii, polygon, jj, interior)
-			/*
-				if polygon.contains(interior):
-					interior = interiors.pop(j)
-					polygon_interiors = list(polygon.interiors)
-					polygon_interiors.append(interior)
-					polygons[i] = Polygon(polygon.exterior, polygon_interiors)
-			*/
+	for _, polygon := range polygons {
+		remaining := make([][]geom.Coord, 0, len(interiors))
+		for _, interior := range interiors {
+			interiorPolygon := geom.NewPolygon(poly.Layout()).MustSetCoords([][]geom.Coord{interior})
+			if Contains(interiorPolygon, polygon) {
+				polygon.Push(geom.NewLinearRing(polygon.Layout()).MustSetCoords(interior))
+			} else {
+				remaining = append(remaining, interior)
+			}
 		}
+
+		interiors = remaining
 	}
 
 	return polygons, nil
@@ -159,20 +183,6 @@ func fixWinding(poly *geom.Polygon) *geom.Polygon {
 func segment(coords []geom.Coord) [][]geom.Coord {
 	currSegment := make([]geom.Coord, 0)
 	segments := make([][]geom.Coord, 0)
-
-	// Ensure all longitudes are between -180 and 180, and that tiny floating
-	// point differences are ignored
-	tol := 1e-08
-	for idx, point := range coords {
-		switch {
-		case math.Abs(point[0]-180.0) <= tol:
-			coords[idx] = geom.Coord{180.0, point[1]}
-		case math.Abs(point[0]+180) <= tol:
-			coords[idx] = geom.Coord{-180.0, point[1]}
-		default:
-			coords[idx] = geom.Coord{math.Mod(point[0]+180.0, 360.0) - 180.0, point[1]}
-		}
-	}
 
 	// create segments
 	for idx := range len(coords) - 1 {
@@ -227,7 +237,7 @@ func crossingLat(start, end geom.Coord) float64 {
 	}
 }
 
-func extendOverPoles(segments [][]geom.Coord) [][]geom.Coord {
+func extendOverPoles(segments [][]geom.Coord, shouldFixWinding bool) [][]geom.Coord {
 	leftStarts := make([]edge, 0)
 	rightStarts := make([]edge, 0)
 	leftEnds := make([]edge, 0)
@@ -249,11 +259,20 @@ func extendOverPoles(segments [][]geom.Coord) [][]geom.Coord {
 
 	slices.SortFunc(leftEnds, cmp)
 	slices.SortFunc(leftStarts, cmp)
-	slices.SortFunc(rightEnds, cmp)
-	slices.SortFunc(rightStarts, cmp)
+	slices.SortFunc(rightEnds, cmpReverse)
+	slices.SortFunc(rightStarts, cmpReverse)
 
 	isOverNorthPole := false
 	isOverSouthPole := false
+
+	// deep copy segments
+	originalSegments := make([][]geom.Coord, len(segments))
+	for ii, sub := range segments {
+		originalSegments[ii] = make([]geom.Coord, len(sub))
+		for jj, val := range sub {
+			originalSegments[ii][jj] = val.Clone()
+		}
+	}
 
 	// If there's no segment ends between a start and the pole, extend the
 	// segment over the pole.
@@ -267,12 +286,14 @@ func extendOverPoles(segments [][]geom.Coord) [][]geom.Coord {
 		segments[rightEnds[0].Index] = append(segments[rightEnds[0].Index], geom.Coord{180, 90}, geom.Coord{-180, 90})
 	}
 
-	if isOverNorthPole && isOverSouthPole {
+	if shouldFixWinding && isOverNorthPole && isOverSouthPole {
 		// If we're over both poles reverse all segments, effectively
 		// reversing the winding order.
-		for _, segment := range segments {
+		for _, segment := range originalSegments {
 			slices.Reverse(segment)
 		}
+
+		return originalSegments
 	}
 
 	return segments
@@ -283,10 +304,13 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 		return []*geom.Polygon{}
 	}
 
+	// pop last segment off list
 	segment := segments[len(segments)-1]
 	segments = segments[:len(segments)-1]
 
-	isRight := segment[len(segment)-1][0] == 180
+	segmentEnd := segment[len(segment)-1]
+
+	isRight := segmentEnd[0] == 180
 	candidates := make([]edge, 0)
 	if isSelfClosing(segment) {
 		// Self-closing segments might end up joining up with themselves. They
@@ -294,17 +318,25 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 		candidates = append(candidates, edge{Index: -1, Val: segment[0][1]})
 	}
 
-	for idx, seg := range segments {
-		// Is the start of s on the same side as the end of segment?
-		if seg[0][0] == segment[len(segment)-1][0] {
+	for idx, s0 := range segments {
+		// Is the start of s0 on the same side as the end of segment?
+		if s0[0][0] == segment[len(segment)-1][0] {
 			// If so, check the following:
-			// - Is the start of seg closer to the pole than the end of segment, and
-			// - is the end of seg on the other side, or
-			// - is the end of seg further away from the pole than the start of
+			// - Is the start of s0 closer to the pole than the end of segment, and
+			// - is the end of s0 on the other side, or
+			// - is the end of s0 further away from the pole than the start of
 			//   segment (e.g. donuts)?
-			if (isRight && seg[0][1] > segment[len(segment)-1][1] && (!isSelfClosing(seg) || seg[len(seg)-1][1] < segment[0][1])) ||
-				(!isRight && seg[0][1] < segment[len(segment)-1][1] && (!isSelfClosing(seg) || seg[len(seg)-1][1] > segment[0][1])) {
-				candidates = append(candidates, edge{Index: idx, Val: seg[0][1]})
+
+			startCloserToNorthPole := s0[0][1] > segmentEnd[1]
+			startCloserToSouthPole := s0[0][1] < segmentEnd[1]
+
+			s0End := s0[len(s0)-1]
+			endFurtherFromNorthPole := s0End[1] < segment[0][1]
+			endFurtherFromSouthPole := s0End[1] > segment[0][1]
+
+			if (isRight && startCloserToNorthPole && (!isSelfClosing(s0) || endFurtherFromNorthPole)) ||
+				(!isRight && startCloserToSouthPole && (!isSelfClosing(s0) || endFurtherFromSouthPole)) {
+				candidates = append(candidates, edge{Index: idx, Val: s0[0][1]})
 			}
 		}
 	}
@@ -316,7 +348,7 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 	}
 
 	index := 0
-	if len(candidates) != 0 {
+	if len(candidates) > 0 {
 		index = candidates[0].Index
 	} else {
 		index = -1
@@ -325,8 +357,9 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 	if index > -1 {
 		// Join the segments, then re-add them to the list and recurse.
 		segment = append(segment, segments[index]...)
-		slices.Delete(segment, index, index)
+		segment = slices.Delete(segment, index, index)
 		segments = append(segments, segment)
+
 		return buildPolygons(layout, segments)
 	} else {
 		// This segment should be self-joining, so just build the rest of the
@@ -342,6 +375,15 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 		}
 
 		if !allEqual {
+			// if the last element does not equal the first of the polygon
+			// close the polygon
+			first := segment[0]
+			last := segment[len(segment)-1]
+
+			if !first.Equal(layout, last) {
+				segment = append(segment, first.Clone())
+			}
+
 			polygon := geom.NewPolygon(layout).MustSetCoords([][]geom.Coord{segment})
 			polygons = append(polygons, polygon)
 		}
@@ -351,9 +393,51 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 }
 
 func isSelfClosing(segment []geom.Coord) bool {
-	isRight := segment[len(segment)-1][0] == 180
-	return segment[0][0] == segment[len(segment)-1][0] && ((isRight && segment[0][1] > segment[len(segment)-1][1]) ||
-		(!isRight && segment[0][1] < segment[len(segment)-1][1]))
+	segmentEnd := segment[len(segment)-1]
+	isRight := segmentEnd[0] == 180
+	return segment[0][0] == segmentEnd[0] &&
+		((isRight && segment[0][1] > segmentEnd[1]) ||
+			(!isRight && segment[0][1] < segmentEnd[1]))
+}
+
+func normalize(coords []geom.Coord) []geom.Coord {
+	// make a copy of the original coordinates
+	original := make([]geom.Coord, len(coords))
+	for idx, v := range coords {
+		original[idx] = v.Clone()
+	}
+
+	allAreOnAntiMeridian := true
+	// Ensure all longitudes are between -180 and 180, and that tiny floating
+	// point differences are ignored
+	tol := 1e-08
+	for idx, point := range coords {
+		switch {
+		case math.Abs(point[0]-180.0) <= tol:
+			wrappedPrevIdx := int(math.Mod(float64(idx-1), float64(len(coords))))
+			if math.Abs(point[1]) != 90 && math.Abs(coords[wrappedPrevIdx][0]+180) <= tol {
+				coords[idx] = geom.Coord{-180.0, point[1]}
+			} else {
+				coords[idx] = geom.Coord{180.0, point[1]}
+			}
+		case math.Abs(point[0]+180) <= tol:
+			wrappedPrevIdx := int(math.Mod(float64(idx-1), float64(len(coords))))
+			if math.Abs(point[1]) != 90 && math.Abs(coords[wrappedPrevIdx][0]-180) <= tol {
+				coords[idx] = geom.Coord{180.0, point[1]}
+			} else {
+				coords[idx] = geom.Coord{-180.0, point[1]}
+			}
+		default:
+			coords[idx] = geom.Coord{math.Mod(point[0]+180.0, 360.0) - 180.0, point[1]}
+			allAreOnAntiMeridian = false
+		}
+	}
+
+	if allAreOnAntiMeridian {
+		return original
+	}
+
+	return coords
 }
 
 func roundFloat(val float64, precision uint) float64 {
@@ -365,6 +449,16 @@ func cmp(a edge, b edge) int {
 	if a.Val < b.Val {
 		return -1
 	} else if a.Val > b.Val {
+		return 1
+	}
+
+	return 0
+}
+
+func cmpReverse(a edge, b edge) int {
+	if a.Val > b.Val {
+		return -1
+	} else if a.Val < b.Val {
 		return 1
 	}
 

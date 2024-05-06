@@ -27,11 +27,15 @@ import (
 )
 
 var _ = DescribeTable("Various Polygons",
-	func(name string) {
-		inp, err := os.ReadFile(fmt.Sprintf("test_data/input/%s.json", name))
+	func(inFile, outFile string, fixWinding bool) {
+		if outFile == "" {
+			outFile = inFile
+		}
+
+		inp, err := os.ReadFile(fmt.Sprintf("test_data/input/%s.json", inFile))
 		Expect(err).To(BeNil())
 
-		out, err := os.ReadFile(fmt.Sprintf("test_data/output/%s.json", name))
+		out, err := os.ReadFile(fmt.Sprintf("test_data/output/%s.json", outFile))
 		Expect(err).To(BeNil())
 
 		var inGeom geom.T
@@ -46,5 +50,6 @@ var _ = DescribeTable("Various Polygons",
 		Expect(err).To(BeNil())
 		Expect(result).To(Equal(outGeom))
 	},
-	Entry("almost touching 180", "almost-180"),
+	Entry("almost touching 180", "almost-180", "almost-180", true),
+	Entry("both poles", "both-poles", "both-poles-fix-winding", true),
 )
