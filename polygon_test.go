@@ -51,6 +51,8 @@ var _ = DescribeTable("Various Polygons",
 		Expect(result).To(Equal(outGeom))
 	},
 	Entry("almost touching 180", "almost-180", "almost-180", true),
-	Entry("fix winding both pole", "both-poles", "both-poles-fix-winding", true),
+	Entry("fix winding both poles", "both-poles", "both-poles-fix-winding", true),
 	Entry("both poles", "both-poles", "both-poles", false),
+	Entry("complex split", "complex-split", "complex-split", true),
+	Entry("crossing latitude", "crossing-latitude", "crossing-latitude", true),
 )
