@@ -46,10 +46,11 @@ var _ = DescribeTable("Various Polygons",
 		err = geojson.Unmarshal(out, &outGeom)
 		Expect(err).To(BeNil())
 
-		result, err := antimeridian.Cut(inGeom)
+		result, err := antimeridian.Cut(inGeom, fixWinding)
 		Expect(err).To(BeNil())
 		Expect(result).To(Equal(outGeom))
 	},
 	Entry("almost touching 180", "almost-180", "almost-180", true),
-	Entry("both poles", "both-poles", "both-poles-fix-winding", true),
+	Entry("fix winding both pole", "both-poles", "both-poles-fix-winding", true),
+	Entry("both poles", "both-poles", "both-poles", false),
 )

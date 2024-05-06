@@ -309,8 +309,8 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 	segments = segments[:len(segments)-1]
 
 	segmentEnd := segment[len(segment)-1]
-
 	isRight := segmentEnd[0] == 180
+
 	candidates := make([]edge, 0)
 	if isSelfClosing(segment) {
 		// Self-closing segments might end up joining up with themselves. They
@@ -357,7 +357,7 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 	if index > -1 {
 		// Join the segments, then re-add them to the list and recurse.
 		segment = append(segment, segments[index]...)
-		segment = slices.Delete(segment, index, index)
+		segments = slices.Delete(segments, index, index+1)
 		segments = append(segments, segment)
 
 		return buildPolygons(layout, segments)
