@@ -29,3 +29,9 @@ Then:
 ```go
 fixedGeom := antimeridian.Cut(geomCrossingAntiMeridian)
 ```
+
+## Credits
+
+This package is heavily inspired by / partially ported from the python [antimeridian package](https://github.com/gadomski/antimeridian).
+
+The illustration is provided by Pawarit Laosunthara from his post [Around the world in 80 lines](https://towardsdatascience.com/around-the-world-in-80-lines-crossing-the-antimeridian-with-python-and-shapely-c87c9b6e1513)
