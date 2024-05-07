@@ -17,6 +17,25 @@ package antimeridian
 
 import "github.com/twpayne/go-geom"
 
-func cutMultiPolygon(poly *geom.MultiPolygon, fixWinding ...bool) (*geom.MultiPolygon, error) {
-	return poly, nil
+func cutMultiPolygon(multiPoly *geom.MultiPolygon, fixWindingArr ...bool) (*geom.MultiPolygon, error) {
+	fixWinding := true
+	if len(fixWindingArr) > 0 {
+		fixWinding = fixWindingArr[0]
+	}
+
+	multiPolygon := geom.NewMultiPolygon(multiPoly.Layout())
+
+	for idx := range multiPoly.NumPolygons() {
+		poly := multiPoly.Polygon(idx)
+		fixedPolys, err := fixPolygonToList(poly, fixWinding)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, polygon := range fixedPolys {
+			multiPolygon.Push(polygon)
+		}
+	}
+
+	return multiPolygon, nil
 }
