@@ -163,11 +163,12 @@ func fixPolygonToList(poly *geom.Polygon, shouldFixWinding bool) ([]*geom.Polygo
 // fixWinding ensures that the exterior ring of the polygon is wound
 // counter-clockwise and all interior rings are wound clockwise
 func fixWinding(poly *geom.Polygon) *geom.Polygon {
+	fixed := geom.NewPolygon(poly.Layout())
 	if !xy.IsRingCounterClockwise(poly.Layout(), poly.LinearRing(0).FlatCoords()) {
 		// exterior ring should be wound counter-clockwise
 		rewoundCoords := poly.LinearRing(0).Coords()
 		slices.Reverse(rewoundCoords)
-		poly.LinearRing(0).MustSetCoords(rewoundCoords)
+		fixed.MustSetCoords([][]geom.Coord{rewoundCoords})
 	}
 
 	// all interior rings should be wound clockwise
@@ -176,11 +177,12 @@ func fixWinding(poly *geom.Polygon) *geom.Polygon {
 		if xy.IsRingCounterClockwise(poly.Layout(), interior.FlatCoords()) {
 			coords := interior.Coords()
 			slices.Reverse(coords)
-			poly.LinearRing(idx + 1).MustSetCoords(coords)
+			ring := geom.NewLinearRing(poly.Layout()).MustSetCoords(coords)
+			fixed.Push(ring)
 		}
 	}
 
-	return poly
+	return fixed
 }
 
 func segment(coords []geom.Coord) [][]geom.Coord {
