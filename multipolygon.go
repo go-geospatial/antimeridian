@@ -33,7 +33,9 @@ func cutMultiPolygon(multiPoly *geom.MultiPolygon, fixWindingArr ...bool) (*geom
 		}
 
 		for _, polygon := range fixedPolys {
-			multiPolygon.Push(polygon)
+			if err := multiPolygon.Push(polygon); err != nil {
+				return nil, err
+			}
 		}
 	}
 

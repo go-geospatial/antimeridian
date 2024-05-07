@@ -41,16 +41,17 @@ func cutPolygon(poly *geom.Polygon, fixWindingArr ...bool) (geom.T, error) {
 
 	if len(polygons) == 1 {
 		polygon := polygons[0]
+
 		if xy.IsRingCounterClockwise(polygon.Layout(), polygon.FlatCoords()) {
 			return polygon, nil
-		} else {
-			return geom.NewPolygon(polygon.Layout()).MustSetCoords(
-				[][]geom.Coord{
-					{{-180, 90}, {-180, -90}, {180, -90}, {180, 90}},
-					polygon.LinearRing(0).Coords(),
-				},
-			), nil
 		}
+
+		return geom.NewPolygon(polygon.Layout()).MustSetCoords(
+			[][]geom.Coord{
+				{{-180, 90}, {-180, -90}, {180, -90}, {180, 90}},
+				polygon.LinearRing(0).Coords(),
+			},
+		), nil
 	}
 
 	// more than one polygon was returned which means we should return a
@@ -58,7 +59,9 @@ func cutPolygon(poly *geom.Polygon, fixWindingArr ...bool) (geom.T, error) {
 
 	multiPolygon := geom.NewMultiPolygon(poly.Layout())
 	for _, polygon := range polygons {
-		multiPolygon.Push(polygon)
+		if err := multiPolygon.Push(polygon); err != nil {
+			return nil, err
+		}
 	}
 
 	return multiPolygon, nil
@@ -84,46 +87,50 @@ func fixPolygonToList(poly *geom.Polygon, shouldFixWinding bool) ([]*geom.Polygo
 
 	if len(segments) == 0 {
 		if shouldFixWinding {
-			correctlyWoundPolygon := fixWinding(poly)
+			correctlyWoundPolygon, err := fixWinding(poly)
+			if err != nil {
+				return nil, err
+			}
+
 			polygons = append(polygons, correctlyWoundPolygon)
 		} else {
 			polygons = append(polygons, poly)
 		}
 
 		return polygons, nil
-	} else {
-		for idx := range poly.NumLinearRings() - 1 {
-			interior := poly.LinearRing(idx + 1)
-			interiorSegments := segment(interior.Coords())
-			if len(interiorSegments) > 0 {
-				if shouldFixWinding {
-					unwrapped := make([]float64, 0, len(interior.Coords())*numCoords)
+	}
 
-					// unwrap coordinates
-					for _, coord := range interior.Coords() {
-						unwrapped = append(unwrapped, mod(coord[0], 360))
-						unwrapped = append(unwrapped, coord[1])
-						if numCoords == 3 {
-							unwrapped = append(unwrapped, coord[2])
-						}
-					}
+	for idx := range poly.NumLinearRings() - 1 {
+		interior := poly.LinearRing(idx + 1)
+		interiorSegments := segment(interior.Coords())
+		if len(interiorSegments) > 0 {
+			if shouldFixWinding {
+				unwrapped := make([]float64, 0, len(interior.Coords())*numCoords)
 
-					// if the interior ring is counter-clockwise, make it clockwise
-					if xy.IsRingCounterClockwise(poly.Layout(), unwrapped) {
-						coords := make([]geom.Coord, len(interior.Coords()))
-						for idx, val := range interior.Coords() {
-							coords[idx] = val.Clone()
-						}
-
-						slices.Reverse(coords)
-						interiorSegments = segment(coords)
+				// unwrap coordinates
+				for _, coord := range interior.Coords() {
+					unwrapped = append(unwrapped, mod(coord[0], 360))
+					unwrapped = append(unwrapped, coord[1])
+					if numCoords == 3 {
+						unwrapped = append(unwrapped, coord[2])
 					}
 				}
 
-				segments = append(segments, interiorSegments...)
-			} else {
-				interiors = append(interiors, interior.Coords())
+				// if the interior ring is counter-clockwise, make it clockwise
+				if xy.IsRingCounterClockwise(poly.Layout(), unwrapped) {
+					coords := make([]geom.Coord, len(interior.Coords()))
+					for idx, val := range interior.Coords() {
+						coords[idx] = val.Clone()
+					}
+
+					slices.Reverse(coords)
+					interiorSegments = segment(coords)
+				}
 			}
+
+			segments = append(segments, interiorSegments...)
+		} else {
+			interiors = append(interiors, interior.Coords())
 		}
 	}
 
@@ -136,7 +143,10 @@ func fixPolygonToList(poly *geom.Polygon, shouldFixWinding bool) ([]*geom.Polygo
 		for _, interior := range interiors {
 			interiorPolygon := geom.NewPolygon(poly.Layout()).MustSetCoords([][]geom.Coord{interior})
 			if Contains(interiorPolygon, polygon) {
-				polygon.Push(geom.NewLinearRing(polygon.Layout()).MustSetCoords(interior))
+				err := polygon.Push(geom.NewLinearRing(polygon.Layout()).MustSetCoords(interior))
+				if err != nil {
+					return nil, err
+				}
 			} else {
 				remaining = append(remaining, interior)
 			}
@@ -150,7 +160,7 @@ func fixPolygonToList(poly *geom.Polygon, shouldFixWinding bool) ([]*geom.Polygo
 
 // fixWinding ensures that the exterior ring of the polygon is wound
 // counter-clockwise and all interior rings are wound clockwise
-func fixWinding(poly *geom.Polygon) *geom.Polygon {
+func fixWinding(poly *geom.Polygon) (*geom.Polygon, error) {
 	fixed := geom.NewPolygon(poly.Layout())
 
 	exteriorCoords := poly.LinearRing(0).Coords()
@@ -171,10 +181,13 @@ func fixWinding(poly *geom.Polygon) *geom.Polygon {
 		}
 
 		ring := geom.NewLinearRing(poly.Layout()).MustSetCoords(coords)
-		fixed.Push(ring)
+		err := fixed.Push(ring)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return fixed
+	return fixed, nil
 }
 
 func segment(coords []geom.Coord) [][]geom.Coord {
@@ -229,9 +242,9 @@ func crossingLat(start, end geom.Coord) float64 {
 
 	if end[0] > 0 {
 		return roundFloat(start[1]+(180.0-start[0])*latDelta/(end[0]+360.0-start[0]), 7)
-	} else {
-		return roundFloat(start[1]+(start[0]+180.0)*latDelta/(start[0]+360.0-end[0]), 7)
 	}
+
+	return roundFloat(start[1]+(start[0]+180.0)*latDelta/(start[0]+360.0-end[0]), 7)
 }
 
 func extendOverPoles(segments [][]geom.Coord, shouldFixWinding bool) [][]geom.Coord {
@@ -358,35 +371,35 @@ func buildPolygons(layout geom.Layout, segments [][]geom.Coord) []*geom.Polygon 
 		segments = append(segments, segment)
 
 		return buildPolygons(layout, segments)
-	} else {
-		// This segment should be self-joining, so just build the rest of the
-		// polygons without it.
-		polygons := buildPolygons(layout, segments)
-
-		// If every point is the same, then we don't need it in the output
-		// set of polygons. This happens if, e.g., one corner of an input
-		// polygon is on the antimeridian.
-		allEqual := true
-		for _, pt := range segment {
-			allEqual = allEqual && (pt.Equal(layout, segment[0]))
-		}
-
-		if !allEqual {
-			// if the last element does not equal the first of the polygon
-			// close the polygon
-			first := segment[0]
-			last := segment[len(segment)-1]
-
-			if !first.Equal(layout, last) {
-				segment = append(segment, first.Clone())
-			}
-
-			polygon := geom.NewPolygon(layout).MustSetCoords([][]geom.Coord{segment})
-			polygons = append(polygons, polygon)
-		}
-
-		return polygons
 	}
+
+	// This segment should be self-joining, so just build the rest of the
+	// polygons without it.
+	polygons := buildPolygons(layout, segments)
+
+	// If every point is the same, then we don't need it in the output
+	// set of polygons. This happens if, e.g., one corner of an input
+	// polygon is on the antimeridian.
+	allEqual := true
+	for _, pt := range segment {
+		allEqual = allEqual && (pt.Equal(layout, segment[0]))
+	}
+
+	if !allEqual {
+		// if the last element does not equal the first of the polygon
+		// close the polygon
+		first := segment[0]
+		last := segment[len(segment)-1]
+
+		if !first.Equal(layout, last) {
+			segment = append(segment, first.Clone())
+		}
+
+		polygon := geom.NewPolygon(layout).MustSetCoords([][]geom.Coord{segment})
+		polygons = append(polygons, polygon)
+	}
+
+	return polygons
 }
 
 func isSelfClosing(segment []geom.Coord) bool {
