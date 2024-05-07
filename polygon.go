@@ -164,22 +164,26 @@ func fixPolygonToList(poly *geom.Polygon, shouldFixWinding bool) ([]*geom.Polygo
 // counter-clockwise and all interior rings are wound clockwise
 func fixWinding(poly *geom.Polygon) *geom.Polygon {
 	fixed := geom.NewPolygon(poly.Layout())
+
+	exteriorCoords := poly.LinearRing(0).Coords()
 	if !xy.IsRingCounterClockwise(poly.Layout(), poly.LinearRing(0).FlatCoords()) {
 		// exterior ring should be wound counter-clockwise
-		rewoundCoords := poly.LinearRing(0).Coords()
-		slices.Reverse(rewoundCoords)
-		fixed.MustSetCoords([][]geom.Coord{rewoundCoords})
+		slices.Reverse(exteriorCoords)
 	}
+
+	fixed.MustSetCoords([][]geom.Coord{exteriorCoords})
 
 	// all interior rings should be wound clockwise
 	for idx := range poly.NumLinearRings() - 1 {
 		interior := poly.LinearRing(idx + 1)
+		coords := interior.Coords()
+
 		if xy.IsRingCounterClockwise(poly.Layout(), interior.FlatCoords()) {
-			coords := interior.Coords()
 			slices.Reverse(coords)
-			ring := geom.NewLinearRing(poly.Layout()).MustSetCoords(coords)
-			fixed.Push(ring)
 		}
+
+		ring := geom.NewLinearRing(poly.Layout()).MustSetCoords(coords)
+		fixed.Push(ring)
 	}
 
 	return fixed
@@ -419,14 +423,14 @@ func normalize(coords []geom.Coord) []geom.Coord {
 	for idx, point := range coords {
 		switch {
 		case math.Abs(point[0]-180.0) <= tol:
-			wrappedPrevIdx := int(math.Mod(float64(idx-1), float64(len(coords))))
+			wrappedPrevIdx := int(math.Abs(math.Mod(float64(idx-1), float64(len(coords)))))
 			if math.Abs(point[1]) != 90 && math.Abs(coords[wrappedPrevIdx][0]+180) <= tol {
 				coords[idx] = geom.Coord{-180.0, point[1]}
 			} else {
 				coords[idx] = geom.Coord{180.0, point[1]}
 			}
 		case math.Abs(point[0]+180) <= tol:
-			wrappedPrevIdx := int(math.Mod(float64(idx-1), float64(len(coords))))
+			wrappedPrevIdx := int(math.Abs(math.Mod(float64(idx-1), float64(len(coords)))))
 			if math.Abs(point[1]) != 90 && math.Abs(coords[wrappedPrevIdx][0]-180) <= tol {
 				coords[idx] = geom.Coord{180.0, point[1]}
 			} else {
