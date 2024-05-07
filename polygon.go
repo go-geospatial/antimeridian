@@ -97,34 +97,22 @@ func fixPolygonToList(poly *geom.Polygon, shouldFixWinding bool) ([]*geom.Polygo
 			interiorSegments := segment(interior.Coords())
 			if len(interiorSegments) > 0 {
 				if shouldFixWinding {
-					flatCoords := make([]float64, 0, len(interior.Coords())*numCoords)
+					unwrapped := make([]float64, 0, len(interior.Coords())*numCoords)
 
 					// unwrap coordinates
 					for _, coord := range interior.Coords() {
-						flatCoords = append(flatCoords, math.Mod(coord[0], 360))
-						flatCoords = append(flatCoords, coord[1])
+						unwrapped = append(unwrapped, mod(coord[0], 360))
+						unwrapped = append(unwrapped, coord[1])
 						if numCoords == 3 {
-							flatCoords = append(flatCoords, coord[2])
+							unwrapped = append(unwrapped, coord[2])
 						}
 					}
 
 					// if the interior ring is counter-clockwise, make it clockwise
-					if xy.IsRingCounterClockwise(poly.Layout(), flatCoords) {
-						coords := make([]geom.Coord, 0, len(interior.Coords()))
-						for idx := range len(interior.Coords()) {
-							switch poly.Layout() {
-							case geom.XY:
-								x := idx * 2
-								y := x + 1
-								coords = append(coords, geom.Coord{flatCoords[x], flatCoords[y]})
-							case geom.XYZ:
-								x := idx * 3
-								y := x + 1
-								z := y + 1
-								coords = append(coords, geom.Coord{flatCoords[x], flatCoords[y], flatCoords[z]})
-							default:
-								return nil, ErrUnsupportedLayout
-							}
+					if xy.IsRingCounterClockwise(poly.Layout(), unwrapped) {
+						coords := make([]geom.Coord, len(interior.Coords()))
+						for idx, val := range interior.Coords() {
+							coords[idx] = val.Clone()
 						}
 
 						slices.Reverse(coords)
@@ -423,21 +411,21 @@ func normalize(coords []geom.Coord) []geom.Coord {
 	for idx, point := range coords {
 		switch {
 		case math.Abs(point[0]-180.0) <= tol:
-			wrappedPrevIdx := int(math.Abs(math.Mod(float64(idx-1), float64(len(coords)))))
+			wrappedPrevIdx := int(mod(float64(idx-1), float64(len(coords))))
 			if math.Abs(point[1]) != 90 && math.Abs(coords[wrappedPrevIdx][0]+180) <= tol {
 				coords[idx] = geom.Coord{-180.0, point[1]}
 			} else {
 				coords[idx] = geom.Coord{180.0, point[1]}
 			}
 		case math.Abs(point[0]+180) <= tol:
-			wrappedPrevIdx := int(math.Abs(math.Mod(float64(idx-1), float64(len(coords)))))
+			wrappedPrevIdx := int(mod(float64(idx-1), float64(len(coords))))
 			if math.Abs(point[1]) != 90 && math.Abs(coords[wrappedPrevIdx][0]-180) <= tol {
 				coords[idx] = geom.Coord{180.0, point[1]}
 			} else {
 				coords[idx] = geom.Coord{-180.0, point[1]}
 			}
 		default:
-			coords[idx] = geom.Coord{math.Mod(point[0]+180.0, 360.0) - 180.0, point[1]}
+			coords[idx] = geom.Coord{mod(point[0]+180.0, 360.0) - 180.0, point[1]}
 			allAreOnAntiMeridian = false
 		}
 	}
@@ -452,6 +440,11 @@ func normalize(coords []geom.Coord) []geom.Coord {
 func roundFloat(val float64, precision uint) float64 {
 	ratio := math.Pow(10, float64(precision))
 	return math.Round(val*ratio) / ratio
+}
+
+// mod is the equivalent of python's % operator
+func mod(a, b float64) float64 {
+	return math.Mod((math.Mod(a, b) + b), b)
 }
 
 func cmp(a edge, b edge) int {

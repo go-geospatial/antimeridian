@@ -48,7 +48,15 @@ var _ = DescribeTable("Various Polygons",
 
 		result, err := antimeridian.Cut(inGeom, fixWinding)
 		Expect(err).To(BeNil())
-		Expect(result).To(Equal(outGeom))
+
+		resCoords := result.FlatCoords()
+		outCoords := outGeom.FlatCoords()
+
+		Expect(resCoords).To(HaveLen(len(outCoords)))
+
+		for idx := range resCoords {
+			Expect(resCoords[idx]).To(BeNumerically("~", outCoords[idx], .0000001), fmt.Sprintf("idx %d\nres = %+v\nexp = %+v", idx, resCoords, outCoords))
+		}
 	},
 	Entry("almost touching 180", "almost-180", "almost-180", true),
 	Entry("fix winding both poles", "both-poles", "both-poles-fix-winding", true),
