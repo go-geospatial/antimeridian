@@ -45,7 +45,10 @@ func cutPolygon(poly *geom.Polygon, fixWindingArr ...bool) (geom.T, error) {
 			return polygon, nil
 		} else {
 			return geom.NewPolygon(polygon.Layout()).MustSetCoords(
-				[][]geom.Coord{{{-180, 90}, {-180, -90}, {180, -90}, {180, 90}}},
+				[][]geom.Coord{
+					{{-180, 90}, {-180, -90}, {180, -90}, {180, 90}},
+					polygon.LinearRing(0).Coords(),
+				},
 			), nil
 		}
 	}
