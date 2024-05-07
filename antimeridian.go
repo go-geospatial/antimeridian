@@ -27,12 +27,13 @@ var (
 )
 
 // Cut divides a geometry at the antimeridian and the poles. A multi-geometry is
-// returned with the cut portions of the original geometry.
+// returned with the cut portions of the original geometry. If no cuts are
+// necessary Cut will return the original geometry with the winding normalized.
 //
-// By default Cut attempts to fix improperly wound geometries Howevever, there
-// are instances where the polygon may be correctly but antimeridian cannot
-// determine this to be so; for example, when the polygon extends over both the
-// north and south pole. For these instances, pass fixWinding = false
+// By default Cut attempts to fix improperly wound geometries; howevever, there
+// are instances where the polygon may be correctly wound but antimeridian
+// cannot determine this to be so; for example, when the polygon extends over
+// both the north and south pole. For these instances, pass fixWinding = false
 func Cut(obj geom.T, fixWinding ...bool) (geom.T, error) {
 	switch geometry := obj.(type) {
 	case *geom.Polygon:
